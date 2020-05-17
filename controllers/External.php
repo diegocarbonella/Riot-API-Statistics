@@ -1,0 +1,246 @@
+<?php
+
+class External {
+
+    /*
+    
+    Todo lo relacionado a jsons externos, consumo de Riot API, guardado de datos en bbdd.
+    
+    */
+
+    //hace multiples funciones, retorna un array con los resultados
+    public static function multicurl($array)
+    {
+        // array of curl handles
+        $multiCurl = array();
+        
+        // guarda el resultado
+        $result = array();
+        
+        // multi handle
+        $mh = curl_multi_init();
+        
+        foreach ($array as $i => $match_id) {
+            $url = "https://la2.api.riotgames.com/lol/match/v4/matches/" . $match_id . "?api_key=" . Config::$api_key;
+            $multiCurl[$match_id] = curl_init();
+            curl_setopt($multiCurl[$match_id], CURLOPT_URL, $url);
+            curl_setopt($multiCurl[$match_id], CURLOPT_HEADER, 0); //<--no incluye el header en el resultado
+            curl_setopt($multiCurl[$match_id], CURLOPT_RETURNTRANSFER, 1); //<--no imprime el resultado
+            curl_multi_add_handle($mh, $multiCurl[$match_id]);
+        }
+        
+        $index=null;
+        
+        do {
+            curl_multi_exec($mh, $index);
+        } while($index > 0);
+        
+        // get content and remove handles
+        foreach($multiCurl as $k => $ch) {
+            // echo $k;
+            $result[$k] = curl_multi_getcontent($ch);
+            curl_multi_remove_handle($mh, $ch);
+        }
+        
+        // close
+        curl_multi_close($mh);
+        
+        return $result;
+    }
+
+
+
+    // Recibe un array de $games (jsons) y empaqueta en [ success_matchs[] , error_matchs[] , jsons[] ]
+    public static function processMatchs($matchs)
+    {
+        // matchs que hubo error (429, 404, 500, etc)
+        $error_matchs = array();
+        // matchs que fueron guardados exitosamente
+        $success_matchs = array();
+        // data json exitosa
+        $jsons = array();
+
+        // itero todos los results (10)
+        foreach ($matchs as $re => $id) {
+
+            $json = json_decode($id, true);
+
+            if (isset($json["status"]["status_code"])){                                                         // hay un error?
+                echo $re . " error " . $json["status"]["status_code"] . "\n";
+                array_push($error_matchs, array("id" => $re, "status_code" => $json["status"]["status_code"])); // guardo el game_id en $error_matchs
+            } else {                                                                                            // no hay error...
+                echo $re . " no hubo error\n";
+                array_push($success_matchs, $re);                                                               // guardo el game_id en $success_matchs
+                array_push($jsons, $json);
+            }
+
+        }
+
+        return array(
+            "jsons" => $jsons,
+            "error_matchs" => $error_matchs,
+            "success_matchs" => $success_matchs
+        );
+
+    }
+
+
+
+    // consume Riot API guarda hasta 100 partidas. 
+    public static function saveJsonGamesFromAPI()
+    {
+        require_once __DIR__ . "/../models/Matchs.php";
+
+        $time_start = microtime(true);
+
+        // obtengo 100 game_id de bbdd
+        $array = Matchs::getNonDuplicates();
+
+        $execution_time = 0;
+
+        $i = 0;
+
+        $store = array( // acá se van a guardar todos los datos obtenidos
+            "jsons" => array(),
+            "error_matchs" => array(),
+            "success_matchs" => array()
+        );
+
+        $matchs_not_found = array(); //<--- acá almaceno las partidas que tienen error 404
+
+        // hace llamadas a Riot API durante 30 segundos,
+        // en ese lapso puede hacer hasta 200 llamadas aproximadamente lo que es suficiente para
+        // usar al máximo el limite de las 100 llamadas cada dos minutos. 
+        while ($execution_time <= 30) {
+
+            sleep(1);
+
+            // 1) saco 10 game_id de $array para hacer multicurl
+            // (son solamente 10 por un rate limit de la RiotAPI)
+            $sliced_array = array_slice($array, 100 - ($i + 1) * 15); 
+            
+            // 2) hago multicurl y almaceno en $result
+            $result = External::multicurl($sliced_array);
+            
+            // 3) proceso $result para separar en tres arrays [success matchs id, error matchs id, jsons (data)]
+            $result = External::processMatchs($result);
+            
+            // 4) empezó siendo array de 100, ahora le resto 10 porque ya analicé esos 10
+            $array = array_diff($array, $sliced_array);
+
+            // 5) por cada partida con error tengo que analizar si fue un error 404, 
+            // de esa manera puedo borrar de bbdd las partidas que no existan
+            foreach ($result["error_matchs"] as $error_match) {
+                if ($error_match["status_code"] == 404) {
+                    array_push($matchs_not_found, $error_match["id"]);
+                    unset($array[$error_match["id"]]);
+                } else {
+                    array_push($array, $error_match["id"]);
+                }
+            }
+
+            // 6) guardo data obtenida
+            $store["jsons"] = array_merge($store["jsons"], $result["jsons"]);
+            $store["success_matchs"] = array_merge($store["success_matchs"], $result["success_matchs"]);
+
+            $time_end = microtime(true);
+            $execution_time = intval($time_end - $time_start);
+            // echo "gathered = ". count($store["success_matchs"]) . " remaining = " . count($array) . " exec time = $execution_time \n";
+
+            if (count($array) < 1) {
+                break;
+            }
+
+            $i++;
+            
+        }
+
+        echo "Obtenidas = " . count($store["success_matchs"]) . "\n";
+        echo "Error = " . count($array) . "\n";
+
+        $number_of_writes = 0;
+
+        foreach ($store["jsons"] as $json)  {
+
+            $fp = fopen(__DIR__ . '/../games/' . $json["gameId"] . '.json', 'w');
+            $json = json_encode($json);
+            fwrite($fp, $json);
+            fclose($fp);
+            $number_of_writes++;
+
+        }
+
+        $mysqli = Matchs::connectToDB();
+
+        if (count($store["success_matchs"]) > 0) {
+            $matchs = Matchs::deleteMatchFutureInDB($mysqli, $store["success_matchs"]);
+            echo " success matches deleted " . $matchs . " \n";
+        }
+
+        if (count($matchs_not_found) > 0) {
+            $matchs = Matchs::deleteMatchFutureInDB($mysqli, $matchs_not_found);
+            echo " matches not found deleted " . $matchs . " \n";
+        }
+
+        echo "Archivos creados = $number_of_writes\n";
+
+        $time_final_end = microtime(true);
+
+        $total_execution_time = intval($time_final_end - $time_start);
+
+        echo "\n";
+
+        echo "Total execution time = $total_execution_time\n";
+
+        echo "Riot API execution time = $execution_time\n";
+
+        $sleep = 120 - $total_execution_time - $execution_time;
+
+        if ($sleep >= 0) {
+            echo "Duerme $sleep \n";
+            sleep($sleep);
+        }
+
+        echo "Fin...\n";
+
+    }
+
+
+
+    // Agrega games_id a tabla matchs_future
+    public static function insertMatchsFromUser()
+    {
+        require_once __DIR__ . "/../models/Users.php";
+        require_once __DIR__ . "/../models/Matchs.php";
+
+        //1 Obtengo un account_id que no haya sido analizado.
+        //2 Obtengo todas las partidas de esa account_id.
+        //3 Tengo que checkear si las partidas que obtuve ya las tengo en bbdd.
+        //4 Las partidas que existan, las tengo que restar de las nuevas que obtuve.
+        //5 Guardo en matchs_future en bbdd.
+
+        $mysqli = Matchs::connectToDB();
+
+        $account_id = Users::selectLastAccountId($mysqli);
+
+        $gathered_matchs = Matchs::getAllMatchesFromUser($account_id, $mysqli);
+
+        $existent_matchs = Matchs::checkIfMatchsExistsInMatchs($gathered_matchs, $mysqli);
+
+        $matchs_to_return = array_diff($gathered_matchs, $existent_matchs); // Le resto las matchs que obtuve de la API externa las que ya tengo en mi bbdd. 
+
+        if (count($matchs_to_return) > 0) {
+
+            // tengo que agregar para que me diga si se agregaron nuevas filas o no..... porque ahora mismo te muestra el numero se hayan agregado o no...
+            echo "Matchs a guardar en matchs_future = " . count($matchs_to_return) . "\n";
+            echo Matchs::setMatchFutureInDB($matchs_to_return);
+        }
+
+    }
+
+}
+
+
+
+
+?>
