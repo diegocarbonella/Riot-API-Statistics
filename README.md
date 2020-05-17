@@ -1,2 +1,3 @@
 # Riot-API-Statistics
-Proyecto para armar una base de datos de las partidas clasificatorias consumiendo Riot API.
+Generador de estadísticas de partidas clasificatorios de League Of Legends consumiendo Riot API.
+Basado en PHP + MySQL nativo simulando la arquitectura MVC.
