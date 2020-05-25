@@ -21,10 +21,9 @@ class Internal {
 
 
 
-    // Lee los nombres de jsons locales y los retorna en un array
-    private static function returnArrayLocalJsons($limit)
+    // Lee los NOMBRES de jsons locales y los retorna en un array.
+    private static function returnArrayLocalJsonNames($limit, $offset = 0)
     {
-        $offset = 0;
         $dir = __DIR__ . "/../games/done";
         $json_array = array_diff(scandir($dir), array('..', '.')); // resta los directorios ".." y "."
         $json_array = array_slice($json_array, $offset, $limit);
@@ -33,7 +32,7 @@ class Internal {
 
 
 
-    // Lee un json local y lo retorna convertido en array
+    // Lee un json local y lo retorna convertido en array.
     private static function readLocalJson($game_id)
     {
         $dir = __DIR__ . "/../games/done/";
@@ -44,10 +43,11 @@ class Internal {
 
 
     // Lee múltiples jsons, tiene $limit como parámetro.
-    public static function readMultipleJsons($limit)
+    // combinación de las dos funciones anteriores.
+    public static function readMultipleJsons($limit, $offset = 0)
     {
         // lee mútiples jsons
-        $json_array = self::returnArrayLocalJsons($limit);
+        $json_array = self::returnArrayLocalJsonNames($limit, $offset);
 
         // tengo que borrar la extension ".json"
         foreach ($json_array as $key => $json) {
@@ -78,97 +78,7 @@ class Internal {
         return $moved;
     }
 
-
-
-    // // Lee jsons locales y los guarda en bbdd
-    // // guarda en matchs, participants, bans, users
-    // public static function insertLocalJsons()
-    // {
-    //     require_once __DIR__ . "/../models/Matchs.php";
-    //     //1 leo 100 jsons y los guardo en un array.
-    //     //2 compruebo si el array existe en la bbdd.
-    //     //3 las que no existan los guardo en bbdd.
-
-
-    //     echo "\n";
-
-    //     $json_array = self::returnArrayLocalJsons();
-
-    //     // tengo que borrar la extension ".json"
-    //     foreach ($json_array as $key => $json) {
-    //         $json_array[$key] = str_replace(".json", '', $json) ;
-    //     }
-
-    //     $mysqli = Matchs::connectToDB();
-    //     $existent_json_array = Matchs::checkIfMatchsExistsInMatchs($json_array, $mysqli);
-
-    //     foreach ($json_array as $key => $json) {
-    //         $json_array[$key] = self::readLocalJson($json);
-    //     }
-
-    //     $success_records = Matchs::saveMatchsFromExternalJSON($json_array);
-
-    //     // acá voy a tener que agregar una nueva función para que handlee en caso de que hay partidas que no puedan ser guardadas...
-
-    //     print_r($success_records);
-
-    //     //muevo el archivo desde done hasta saved
-    //     foreach ($success_records as $game_id) {
-    //         $old_dir = __DIR__ . "/../games/done/"       . $game_id . ".json";
-    //         $new_dir = __DIR__ . "/../games/done/saved/" . $game_id . ".json";
-    //         rename($old_dir, $new_dir);
-    //     }
-    // }
-
-
-
-
-
-
-
-
-
-    // // Lee jsons locales y los guarda en bbdd
-    // // guarda en matchs, participants, bans, users
-    // public static function insertLocalJsons2()
-    // {
-    //     require_once __DIR__ . "/../models/Matchs.php";
-    //     //1 leo 100 jsons y los guardo en un array.
-    //     //2 compruebo si el array existe en la bbdd.
-    //     //3 las que no existan los guardo en bbdd.
-
-
-    //     echo "\n";
-
-    //     $json_array = self::returnArrayLocalJsons();
-
-    //     // tengo que borrar la extension ".json"
-    //     foreach ($json_array as $key => $json) {
-    //         $json_array[$key] = str_replace(".json", '', $json) ;
-    //     }
-
-    //     $mysqli = Matchs::connectToDB();
-    //     $existent_json_array = Matchs::checkIfMatchsExistsInMatchs($json_array, $mysqli);
-
-    //     foreach ($json_array as $key => $json) {
-    //         $json_array[$key] = self::readLocalJson($json);
-    //     }
-
-    //     $success_records = Matchs::saveMatchsFromExternalJSON($json_array);
-
-    //     // acá voy a tener que agregar una nueva función para que handlee en caso de que hay partidas que no puedan ser guardadas...
-
-    //     print_r($success_records);
-
-    //     //muevo el archivo desde done hasta saved
-    //     foreach ($success_records as $game_id) {
-    //         $old_dir = __DIR__ . "/../games/done/"       . $game_id . ".json";
-    //         $new_dir = __DIR__ . "/../games/done/saved/" . $game_id . ".json";
-    //         rename($old_dir, $new_dir);
-    //     }
-    // }
-
-
+    
 
     // Lee jsons locales e inserta en bbdd,
     public static function insertMultipleMatchs($json_array)
@@ -272,12 +182,23 @@ class Internal {
 
 
 
-    public static function dale()
+    // Carga un array de jsons, analiza cuáles son ranked, borra los que no son ranked.  
+    public static function deleteNonRanked()
     {
-        // $json = self::readLocalJson(839056942);
-        $json = self::readLocalJson(836529761);
+        $json_array = self::readMultipleJsons(1000, 0);
 
-        echo self::isRankedMatch($json);
+        $non_ranked_array = array();
+
+        foreach ($json_array as $json) {
+
+            if (!self::isRankedMatch($json)) {
+                array_push($non_ranked_array, $json);
+            }
+
+        }
+
+        print_r("Total : " . count($non_ranked_array) . "\n");
+
     }
 
 }
