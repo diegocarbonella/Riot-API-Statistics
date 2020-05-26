@@ -597,7 +597,6 @@ class Matchs extends Database {
             $duplicates = 'where m.game_id is null';
         }
 
-        // armo la query
         $query =    'select f.game_id from matchs_future f
                     left join matchs m on f.game_id = m.game_id ' .
                     $duplicates
@@ -635,67 +634,6 @@ class Matchs extends Database {
         }
         return $success_records;
     }
-
-
-
-    // ESTO DEBERIA IR EN UN CONTROLADOR
-    // Retorna todas las rankeds de un jugador dado su $account_id
-    public static function getAllMatchesFromUser($account_id, $mysqli)
-    {
-        $wrapper = array(); // TODAS las partidas a retornar
-
-        $queue = 420;
-        $begin_index = 0;
-        $end_index = 100;
-        $season = 13;
-
-        $matchs = array(1); // partidas en una consulta (máximo 100)
-
-        $i = 0;             // iterador para calcular el $begin_index y $end_index
-
-        // pregunta si el valor obtenido por la api de matchs > 0
-        while (count($matchs) > 0) {
-
-            $begin_index = $i * 100;        // arranca en 0
-            $end_index   = ($i + 1) * 100;  // arranca en 100
-
-            // echo $i . " Begin Index = " . $begin_index . "   End Index = " . $end_index . "\n";
-            // echo "Count = " . count($wrapper) . " matchs = " . count($matchs) ."\n";
-
-            $url_params = array(
-                "queue" => $queue,
-                "endIndex" => $end_index,
-                "beginIndex" => $begin_index,
-                "season" => $season
-            );
-
-            $end_point = "https://la2.api.riotgames.com/lol/match/v4/matchlists/by-account/" . $account_id;
-            $url = self::createUrl($end_point, $url_params);
-            $data = self::consumeRiotAPI($url);
-
-            if (!isset($data[0]["matches"])) { // hay error
-                echo "\nError:" . $data[1] . "\n";
-                if ($data[1] == 404) {
-                    return $wrapper;
-                }
-                continue;
-            }
-
-            $matchs = $data[0]["matches"];
-
-            // por cada match recibida (máx 100) va a guardarla en $wrapper
-            foreach ($matchs as $match) {
-                array_push($wrapper, $match["gameId"]);
-            }
-
-            $i += 1;
-        }
-
-        return $wrapper;
-    }
-    
-
-
 
 }
 

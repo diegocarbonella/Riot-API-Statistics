@@ -5,6 +5,7 @@ class Internal {
     /*
     
     Todo lo relacionado a jsons internos, llamadas a mysql internas, escritura y lectura de archivos.
+    Usado principalmente con la shell.
     
     */
 
@@ -21,12 +22,24 @@ class Internal {
 
 
 
-    // Lee los NOMBRES de jsons locales y los retorna en un array.
-    private static function returnArrayLocalJsonNames($limit, $offset = 0)
+    // Lee un directorio local y retorna los NOMBRES de los archivos jsons.
+    private static function returnArrayLocalJsonNames($limit, $offset = 0, $dir)
     {
-        $dir = __DIR__ . "/../games/done";
         $json_array = array_diff(scandir($dir), array('..', '.')); // resta los directorios ".." y "."
         $json_array = array_slice($json_array, $offset, $limit);
+
+        foreach ($json_array as $key => $json) {
+
+            if (strpos('.json', $json) !== FALSE) {
+
+                print_r($key . " " . $json .  "\n");
+                print_r("hola");
+                unset($json_array[$key]);
+
+            }
+
+        }
+
         return $json_array;
     }
 
@@ -37,51 +50,91 @@ class Internal {
     {
         $dir = __DIR__ . "/../games/done/";
         $json = file_get_contents($dir . $game_id . ".json");
-        return $json = json_decode($json, true);
+
+        if ($json == false) {
+
+            return false;
+
+        } 
+
+        return json_decode($json, true);
     }
 
 
 
     // Lee múltiples jsons, tiene $limit como parámetro.
     // combinación de las dos funciones anteriores.
-    public static function readMultipleJsons($limit, $offset = 0)
+    public static function readMultipleJsons($limit, $offset = 0, $dir)
     {
-        // lee mútiples jsons
-        $json_array = self::returnArrayLocalJsonNames($limit, $offset);
+        // lee los nombres de mútiples jsons.
+        $json_array = self::returnArrayLocalJsonNames($limit, $offset, $dir);
 
-        // tengo que borrar la extension ".json"
-        foreach ($json_array as $key => $json) {
-            $json_array[$key] = str_replace(".json", '', $json) ;
+        // borra la extension ".json"
+        foreach ($json_array as $key => $file_name) {
+
+            // si no es un .json lo borra del array.
+            if (strpos($json_array[$key], '.json') === FALSE) {
+
+                unset($json_array[$key]);
+                continue;
+
+            }
+
+            $json_array[$key] = str_replace(".json", '', $file_name);
+
         }
 
         // carga la data de cada partida
         foreach ($json_array as $key => $json) {
+
             $json_array[$key] = self::readLocalJson($json);
+
         }
+
         return $json_array;
     }
 
 
 
     // Mueve jsons desde un directorio a otro, 
-    // retorna cuantos movió
-    public static function moveJsons($json_array)
+    // retorna cuántos movió.
+    public static function moveJsons($json_array, $source, $destination)
     {
         $moved = 0;
+
         foreach ($json_array as $game_id) {
-            $old_dir = __DIR__ . "/../games/done/"       . $game_id . ".json";
-            $new_dir = __DIR__ . "/../games/done/saved/" . $game_id . ".json";
+
+            $old_dir = $source      . $game_id . ".json";
+            $new_dir = $destination . $game_id . ".json";
+
             if (rename($old_dir, $new_dir) == true) {
+
                 $moved += 1;
+
             }
+
         }
+
         return $moved;
+    }
+
+
+
+    // Borra archivos jsons locales.  
+    public static function deleteJsons($json_array, $dir)
+    {
+        foreach ($json_array as $json) {
+
+            $file = $dir . $json . ".json";
+            unlink($file);
+
+        }
     }
 
     
 
-    // Lee jsons locales e inserta en bbdd,
-    public static function insertMultipleMatchs($json_array)
+    // Inserta jsons en bbdd,
+    public static function insertMultipleMatchsInDB($json_array)
     {
         require_once __DIR__ . "/../models/Matchs.php";
         require_once __DIR__ . "/../models/Bans.php";
@@ -89,31 +142,43 @@ class Internal {
         require_once __DIR__ . "/../models/Users.php";
         $mysqli = Matchs::connectToDB();
 
-        // Proceso matchs
+        // Procesa matchs.
         $matchs = array();
+
         foreach ($json_array as $json) {
+
             array_push($matchs, Matchs::processMatchData($json));
+
         }
 
-        // Proceso bans
+        // Procesa bans.
         $bans = array();
+
         foreach ($json_array as $json) {
+
             $bans = array_merge($bans, array_values(Matchs::processBansData($json)));
+
         }
 
-        // Proceso participants
+        // Proceso participants.
         $participants = array();
-        foreach ($json_array as $json) {  
+
+        foreach ($json_array as $json) { 
+
             $participants = array_merge($participants, Matchs::processParticipantsData($json));
+
         }
 
-        // Proceso users
+        // Proceso users.
         $users = array();
+
         foreach ($json_array as $json) {
+
             $users = array_merge($users, array_values(Matchs::processUsersData($json)));
+
         }
 
-        // Retorna la cantidad de satisfactorios
+        // Retorna cuenta de los casos.
         return array(
             "matchs"       => Matchs::saveMultipleMatchs($matchs, $mysqli),
             "users"        => Users::saveMultipleUsers($users, $mysqli),
@@ -124,32 +189,30 @@ class Internal {
 
 
 
-    // Procesa multiples jsons locales y los inserta en bbdd.
-    public static function processLocalJsonsAndInsertInDB()
+    // Procesa múltiples jsons locales y los inserta en bbdd.
+    public static function processLocalJsonsAndInsertInDB($files)
     {
-        $files = 250;
-        $json_array = self::readMultipleJsons($files);
+        $json_array = self::readMultipleJsons($files, 0, __DIR__ . "/../games/done/");
 
-        $result = self::insertMultipleMatchs($json_array);
+        $number_of_files = count($json_array);
 
-        // Salió todo bien?
-        if ($result["users"] >= $files*10 && $result["bans"] >= $files*10 && $result["participants"] >= $files*10) {
+        $result = self::insertMultipleMatchsInDB($json_array);
 
-            // convierto mi $json_array en $game_id_array
+        if ($result["users"] >= $number_of_files*10 && $result["bans"] >= $number_of_files*10 && $result["participants"] >= $number_of_files*10) {
+
+            // mejorar esto
             $game_id_array = array();
+
             foreach ($json_array as $key => $json) {
+
                 array_push($game_id_array, $json["gameId"]);
+
             }
 
-            // Muevo el archivo desde done hasta saved
-            echo "success moved : " . self::moveJsons($game_id_array) . " matchs added : " . $result["matchs"] . "\n";
-
-            print_r($result);
-
+            $moved_jsons = self::moveJsons($game_id_array, __DIR__ . "/../games/done/", __DIR__ . "/../games/done/saved/");
+            echo "success moved : " . $moved_jsons . " matchs added : " . $result["matchs"] . "\n";
 
         } else {
-
-
 
             // // convierto mi $json_array en $game_id_array
             // $game_id_array = array();
@@ -160,19 +223,16 @@ class Internal {
             // // Muevo el archivo desde done hasta saved
             // echo "success moved : " . self::moveJsons($game_id_array) . " matchs added : " . $result["matchs"] . "\n";
 
-
-
             echo "????????????????????????????????????????????????????????????????????????????????????????";
             print_r($result);
 
         }
-
     }
 
 
 
     // Checkea si un json es ranked,
-    public static function isRankedMatch($json)
+    private static function isRankedMatch($json)
     {
         if ($json["queueId"] == 420 && $json["gameMode"] == "CLASSIC" && $json["gameType"] == "MATCHED_GAME") {
             return true;
@@ -182,23 +242,20 @@ class Internal {
 
 
 
-    // Carga un array de jsons, analiza cuáles son ranked, borra los que no son ranked.  
-    public static function deleteNonRanked()
+    // Carga un array de jsons files, analiza cuáles no son ranked y los elimina.  
+    public static function deleteJsonsNonRanked($limit, $offset)
     {
-        $json_array = self::readMultipleJsons(1000, 0);
-
+        $json_array = self::readMultipleJsons($limit, $offset, __DIR__ . "/../games/done/");
+    
         $non_ranked_array = array();
 
         foreach ($json_array as $json) {
-
             if (!self::isRankedMatch($json)) {
-                array_push($non_ranked_array, $json);
+                array_push($non_ranked_array, $json["gameId"]);
             }
-
         }
 
-        print_r("Total : " . count($non_ranked_array) . "\n");
-
+        return self::moveJsons($non_ranked_array, __DIR__ . "/../games/done/", __DIR__ . "/../games/error/");
     }
 
 }

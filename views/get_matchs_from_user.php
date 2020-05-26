@@ -10,14 +10,10 @@ error_reporting(E_ALL);
 require_once __DIR__ . "/../controllers/External.php";
 require_once __DIR__ . "/../models/Matchs.php";
 
+for ($i = 0; $i < 100 ; $i++) {
 
+    External::insertMatchsFromUser();
 
-$dale = External::insertMatchsFromUser();
+}
 
-print_r($dale);
-
-
-
-
-
-?>
+?> 

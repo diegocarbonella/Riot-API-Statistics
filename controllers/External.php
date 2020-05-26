@@ -93,8 +93,10 @@ class External {
 
         $time_start = microtime(true);
 
+        $mysqli = Matchs::connectToDB();
+
         // obtengo 100 game_id de bbdd
-        $array = Matchs::getNonDuplicates();
+        $array = Matchs::selectDuplicatesOrNot($mysqli, false);
 
         $execution_time = 0;
 
@@ -213,29 +215,95 @@ class External {
         require_once __DIR__ . "/../models/Users.php";
         require_once __DIR__ . "/../models/Matchs.php";
 
-        //1 Obtengo un account_id que no haya sido analizado.
-        //2 Obtengo todas las partidas de esa account_id.
-        //3 Tengo que checkear si las partidas que obtuve ya las tengo en bbdd.
-        //4 Las partidas que existan, las tengo que restar de las nuevas que obtuve.
-        //5 Guardo en matchs_future en bbdd.
-
         $mysqli = Matchs::connectToDB();
 
         $account_id = Users::selectLastAccountId($mysqli);
 
-        $gathered_matchs = Matchs::getAllMatchesFromUser($account_id, $mysqli);
+        $gathered_matchs = self::getAllMatchesFromUser($account_id, $mysqli);
+
+        echo "Matchs obtenidas : " . count($gathered_matchs) . "\n";
+
+        if (count($gathered_matchs) == 0) {
+
+            return false;
+
+        }
 
         $existent_matchs = Matchs::checkIfMatchsExistsInMatchs($gathered_matchs, $mysqli);
 
-        $matchs_to_return = array_diff($gathered_matchs, $existent_matchs); // Le resto las matchs que obtuve de la API externa las que ya tengo en mi bbdd. 
+        $matchs_to_save = array_diff($gathered_matchs, $existent_matchs); // Resta las matchs que obtuvo de la API externa las que ya tengo en mi bbdd. 
+        
+        echo "Matchs a guardar : " . count($matchs_to_save)  . "\n";
 
-        if (count($matchs_to_return) > 0) {
+        // tengo que agregar para que me diga si se agregaron nuevas filas o no..... porque ahora mismo te muestra el numero se hayan agregado o no...
+        if (count($matchs_to_save) > 0) {
 
-            // tengo que agregar para que me diga si se agregaron nuevas filas o no..... porque ahora mismo te muestra el numero se hayan agregado o no...
-            echo "Matchs a guardar en matchs_future = " . count($matchs_to_return) . "\n";
-            echo Matchs::setMatchFutureInDB($matchs_to_return);
+            echo Matchs::setMatchFutureInDB($matchs_to_save)     . "\n";
+
         }
 
+    }
+
+
+
+    // Retorna game_id_array de todas las rankeds de un jugador dado su $account_id
+    public static function getAllMatchesFromUser($account_id, $mysqli)
+    {
+        $game_id_array = array(); // TODAS las partidas a retornar
+
+        $queue       = 420;
+        $begin_index = 0;
+        $end_index   = 100;
+        $season      = 13;
+
+        $obtained_matchs = array(1); // número de partidas en una consulta (máximo 100).
+
+        $i = 0;
+
+        // pregunta si el valor obtenido por la api de matchs > 0
+        while (count($obtained_matchs) > 0) {
+
+            $begin_index = ($i)     * 100;  // arranca en 0
+            $end_index   = ($i + 1) * 100;  // arranca en 100
+
+            $url_params = array(
+                "queue"      => $queue,
+                "endIndex"   => $end_index,
+                "beginIndex" => $begin_index,
+                "season"     => $season
+            );
+
+            $end_point = "https://la2.api.riotgames.com/lol/match/v4/matchlists/by-account/" . $account_id;
+            $url       = Matchs::createUrl($end_point, $url_params);
+            $data      = Matchs::consumeRiotAPI($url);
+
+            if (!isset($data[0]["matches"])) { // hay error
+
+                echo "\nError:" . $data[1] . "\n";
+
+                if ($data[1] == 404) {
+
+                    return $game_id_array;
+
+                }
+
+                continue;
+
+            }
+
+            $obtained_matchs = $data[0]["matches"];
+
+            // por cada match recibida (máx 100) va a guardarla en $wrapper
+            foreach ($obtained_matchs as $match) {
+
+                array_push($game_id_array, $match["gameId"]);
+
+            }
+
+            $i += 1;
+        }
+
+        return $game_id_array;
     }
 
 }
